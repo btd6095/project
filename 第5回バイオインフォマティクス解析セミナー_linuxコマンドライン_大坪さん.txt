@@ -1,0 +1,40 @@
+wget ftp://ftp.ensemblgenomes.org/pub/release-47/plants/fasta/arabidopsis_thaliana/dna/Arabidopsis_thaliana.TAIR10.dna.chromosome.1.fa.gz #A. thalianaのリファレンスゲノムとしてクロモゾーム1のみをダウンロード（本当は良くないが、時間の都合により）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/009/SRR7508939/SRR7508939_1.fastq.gz #RNA-Seqデータのダウンロード（WT, forward）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/009/SRR7508939/SRR7508939_2.fastq.gz # RNA-Seqデータのダウンロード（WT, reverse
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/000/SRR7508940/SRR7508940_1.fastq.gz #RNA-Seqデータのダウンロード（WT, forward）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/000/SRR7508940/SRR7508940_2.fastq.gz #RNA-Seqデータのダウンロード（WT, reverse）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/002/SRR7508942/SRR7508942_1.fastq.gz #RNA-Seqデータのダウンロード（NSR, forward ）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/002/SRR7508942/SRR7508942_2.fastq.gz #RNA-Seqデータのダウンロード（NSR, reverse）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/003/SRR7508943/SRR7508943_1.fastq.gz #RNA-Seqデータのダウンロード（NSR, forward ）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/003/SRR7508943/SRR7508943_2.fastq.gz #RNA-Seqデータのダウンロード（NSR, reverse）
+wget ftp://ftp.ensemblgenomes.org/pub/release-47/plants/gtf/arabidopsis_thaliana/Arabidopsis_thaliana.TAIR10.47.gtf.gz #Ensemblデータベースに登録されているGTFファイルをダウンロード
+gzip -d *.gz #ダウンロードしたファイルを解凍
+
+hisat2-build Arabidopsis_thaliana.TAIR10.dna.chromosome.1.fa Arabidopsis_thaliana.TAIR10.dna.chromosome.1 #リファレンスゲノム(遺伝子内にイントロンがある真核生物ゲノム)のindexを作成
+
+for prefix in SRR7508939 SRR7508940 SRR7508942 SRR7508943 #ループに使用される値のリストと、値リストの各要素がループ毎に設定される変数を指定
+do #ループ開始
+fastqc ${prefix}_1.fastq ${prefix}_2.fastq #ダウンロードしたデータのクオリティチェック
+fastp -i ${prefix}_1.fastq -I ${prefix}_2.fastq -o ${prefix}_1_trimmed.fastq -O ${prefix}_2_trimmed.fastq -q 33 -l 99 -h ${prefix}.html -j ${prefix}.json #データの前処理
+fastqc ${prefix}_1_trimmed.fastq ${prefix}_2_trimmed.fastq #前処理したデータのクオリティチェック
+hisat2 -x Arabidopsis_thaliana.TAIR10.dna.chromosome.1 -1 ${prefix}_1_trimmed.fastq -2 ${prefix}_2_trimmed.fastq -S ${prefix}.sam #リファレンスゲノムにペアエンドリードをマッピング
+samtools view -bS ${prefix}.sam > ${prefix}.bam #samファイルをbamファイルに変換する
+samtools sort ${prefix}.bam > ${prefix}_sorted.bam #マップされた位置をもとにbamファイルをソート
+samtools index ${prefix}_sorted.bam #可視化するためにbamにindexを付ける
+done #ループ終了
+
+for prefix in SRR7508939 SRR7508940 SRR7508942 SRR7508943 #ループに使用される値のリストと、値リストの各要素がループ毎に設定される変数を指定
+do #ループ開始
+stringtie -G Arabidopsis_thaliana.TAIR10.47.gtf -o ${prefix}.gtf ${prefix}_sorted.bam #EnsemblデータベースのGTFファイルに記載された遺伝子の発現量を測定
+done #ループ終了
+
+ls SRR*.gtf > mergelist.txt #各サンプルのgtfファイルのリスト作成
+stringtie --merge -G Arabidopsis_thaliana.TAIR10.47.gtf -o merged_data.gtf mergelist.txt #各サンプルのgtfファイルのマージ
+gffcompare -r Arabidopsis_thaliana.TAIR10.47.gtf -G -o merged merged_data.gtf #生成された遺伝子リストとreferenceの遺伝子リストを比較し、referenceに含まれない新規転写産物を探索するためのファイルを作成
+
+for prefix in SRR7508939 SRR7508940 SRR7508942 SRR7508943 #各サンプルの解析データを格納するディレクトリの作成
+do #ループ開始
+rm -r ${prefix} #前回の作業ディレクトリを消去
+mkdir ${prefix} #各サンプルの解析データを格納するディレクトリの作成
+stringtie -e -B -G merged_data.gtf -o ${prefix}/${prefix}_ball.gtf ${prefix}_sorted.bam -p 20 #新しく得られたGTFファイルに記載された遺伝子の発現量を測定し、Ballgownで可視化
+done #ループ終了

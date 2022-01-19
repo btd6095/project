@@ -1,0 +1,41 @@
+conda install -c bioconda -y fastqc #データクオリティの可視化ツール
+conda install -c bioconda -y multiqc #様々なバイオインフォマティクス解析ツールの解析結果を1つに集約するツール
+conda install -c bioconda -y hisat2 #高速なRNA seqのマッピングツール
+conda install -c bioconda -y stringtie #転写産物のアセンブリおよび発現量解析ツール
+conda install -c bioconda -y samtools #SAM/BAM形式のマッピング結果ファイルを扱うためのツール
+conda install -c bioconda -y fastp #包括的なfastqの前処理ツール
+conda install -c bioconda -y gffcompare #GTFファイルを比較するツール
+mkdir RNA-Seq_training #本日の作業用ディレクトリを作成
+cd RNA-Seq_training #ディレクトリ移動
+wget ftp://ftp.ensemblgenomes.org/pub/release-47/plants/fasta/arabidopsis_thaliana/dna/Arabidopsis_thaliana.TAIR10.dna.chromosome.1.fa.gz #A. thalianaのリファレンスゲノムとしてクロモゾーム1のみをダウンロード（本当は良くないが、時間の都合により）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/009/SRR7508939/SRR7508939_1.fastq.gz #RNA-Seqデータのダウンロード（WT, forward）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/009/SRR7508939/SRR7508939_2.fastq.gz # RNA-Seqデータのダウンロード（WT, reverse）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/002/SRR7508942/SRR7508942_1.fastq.gz #RNA-Seqデータのダウンロード（NSR, forward ）
+wget ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR750/002/SRR7508942/SRR7508942_2.fastq.gz #RNA-Seqデータのダウンロード（NSR, reverse）
+wget ftp://ftp.ensemblgenomes.org/pub/release-47/plants/gtf/arabidopsis_thaliana/Arabidopsis_thaliana.TAIR10.47.gtf.gz #Ensemblデータベースに登録されているGTFファイルをダウンロード
+gzip -d *.gz #ダウンロードしたファイルを解凍
+
+
+fastqc SRR7508939_1.fastq SRR7508939_2.fastq SRR7508942_1.fastq SRR7508942_2.fastq #ダウンロードしたデータのクオリティチェック
+multiqc . -s #クオリティチェックの結果をまとめて表示
+fastp -i SRR7508939_1.fastq -I SRR7508939_2.fastq -o SRR7508939_1_trimmed.fastq -O SRR7508939_2_trimmed.fastq -q 33 -l 99 -h SRR7508939.html -j SRR7508939.json #データの前処理
+fastp -i SRR7508942_1.fastq -I SRR7508942_2.fastq -o SRR7508942_1_trimmed.fastq -O SRR7508942_2_trimmed.fastq -q 33 -l 99 -h SRR7508942.html -j SRR7508942.json #データの前処理
+fastqc SRR7508939_1_trimmed.fastq SRR7508939_2_trimmed.fastq SRR7508942_1_trimmed.fastq SRR7508942_2_trimmed.fastq #前処理したデータのクオリティチェック
+multiqc . -s #これまでのクオリティチェックの結果をまとめて表示
+
+hisat2-build Arabidopsis_thaliana.TAIR10.dna.chromosome.1.fa Arabidopsis_thaliana.TAIR10.dna.chromosome.1 #リファレンスゲノム(遺伝子内にイントロンがある真核生物ゲノム)のindexを作成
+hisat2 -x Arabidopsis_thaliana.TAIR10.dna.chromosome.1 -1 SRR7508939_1_trimmed.fastq -2 SRR7508939_2_trimmed.fastq -S SRR7508939.sam #リファレンスゲノムにペアエンドリードをマッピング
+samtools view -bS SRR7508939.sam > SRR7508939.bam #samファイルをbamファイルに変換する
+samtools sort SRR7508939.bam > SRR7508939_sorted.bam #マップされた位置をもとにbamファイルをソート
+samtools index SRR7508939_sorted.bam #可視化するためにbamにindexを付ける
+hisat2 -x Arabidopsis_thaliana.TAIR10.dna.chromosome.1 -1 SRR7508942_1_trimmed.fastq -2 SRR7508942_2_trimmed.fastq -S SRR7508942.sam  #リファレンスゲノムにペアエンドリードをマッピング
+samtools view -bS SRR7508942.sam > SRR7508942.bam  #samファイルをbamファイルに変換する
+samtools sort SRR7508942.bam SRR7508942_sorted #マップされた位置をもとにbamファイルをソート
+samtools index SRR7508942_sorted.bam #可視化するためにbamにindexを付ける
+
+
+stringtie -G Arabidopsis_thaliana.TAIR10.47.gtf -o SRR7508939.gtf SRR7508939_sorted.bam #EnsemblデータベースのGTFファイルに記載された遺伝子の発現量を測定
+stringtie -G Arabidopsis_thaliana.TAIR10.47.gtf -o SRR7508942.gtf SRR7508942_sorted.bam #EnsemblデータベースのGTFファイルに記載された遺伝子の発現量を測定
+ls SRR*.gtf > mergelist.txt #各サンプルのgtfファイルのリスト作成
+stringtie --merge -G Arabidopsis_thaliana.TAIR10.47.gtf -o merged_data.gtf mergelist.txt #各サンプルのgtfファイルのマージ
+gffcompare -r Arabidopsis_thaliana.TAIR10.47.gtf -G -o merged merged_data.gtf #生成された遺伝子リストとreferenceの遺伝子リストを比較し、referenceに含まれない新規転写産物を探索するためのファイルを作成

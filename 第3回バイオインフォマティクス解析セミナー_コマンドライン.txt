@@ -1,0 +1,23 @@
+wget {weblink} #OSおよびPythonのバージョンに合わせて、インストーラーをダウンロードする
+【インストーラーを実行】 #minicondaのインストール（色々と質問されるが、基本的にEnterを押すか、もしくはYesと入力）
+vi .bash_profile #minicondaのインストール後に、condaへPATHを通す
+source .bash_profile #bashの設定ファイルを再読み込み
+conda -h #condaが正常にインストールされたかどうかチェック。エラーが返ってこなければOK
+conda config --add channels conda-forge
+conda config --add channels defaults
+conda config --add channels r
+conda config --add channels bioconda
+conda install -y htop #システム上で動いているプロセスやCPU・メモリの使用率を閲覧するためのツール
+conda install -c bioconda -y blast #問い合わせ配列（Query）に類似した配列（Reference）をデータベース中から検索するツール。Basic Local Alignment Search Toolの略
+conda install -y fastx_toolkit #FASTQ のクオリティコントロールによく利用されるツールの一つ
+mkdir -p blastdb/nr && mkdir -p blastdb/nt #NCBIデータベースを構築するためのディレクトリを作成
+cd blastdb/nt #ディレクトリ移動
+screen #仮想ターミナルの起動
+for i in {00..24}; do wget ftp://ftp.ncbi.nlm.nih.gov/blast/db/nt.$i.tar.gz; done #NCBI ntデータベースをダウンロード（時間がかかる）
+
+#Ctrl+a+dでディタッチ、プロセス終了後に下記コマンドで解凍
+tar -zxvf nt.*.tar.gz
+
+cp ~/SRR444595.fastq ./
+fastq_to_fasta -i SRR444595.fastq -o SRR444595.fasta -Q33 #SRR444595.fastqファイルをPhredクオリティスコアが33（1/2000のベースコールミス）以上のreadだけを残すように、fastaファイルに変換
+blastn -db nt -query SRR444595.fasta -out SRR444595.csv #NCBI ntデータベースに対し、SRR444595.fastaファイルのreadを検索
